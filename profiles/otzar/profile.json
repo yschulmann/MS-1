@@ -1,0 +1,19 @@
+{
+  "name": "אוצר הספרים",
+  "tagline": "כל ספרי האוצר — במרחק חיפוש אחד",
+  "emoji": "📚",
+  "preset": "parchment",
+  "locations": [
+    {"name": "אויצר", "shelf_from": 1, "shelf_to": 399, "letter": ""},
+    {"name": "עזרת נשים", "shelf_from": 400, "shelf_to": 700, "letter": ""},
+    {"name": "ארכיון", "shelf_from": 900, "shelf_to": 999, "letter": ""},
+    {"name": "פרוזדור", "shelf_from": null, "shelf_to": null, "letter": "פ"}
+  ],
+  "conditions": [
+    {"name": "חדש ממש", "color": "#1F7A3A"}, {"name": "חדש", "color": "#1F7A3A"},
+    {"name": "תקין", "color": "#2E6F8E"}, {"name": "תקין - לא כרוך", "color": "#8A6D00"},
+    {"name": "תיקון קל", "color": "#B45F06"}, {"name": "זקוק לתיקון", "color": "#A61C1C"},
+    {"name": "ארכיון", "color": "#5B5B5B"}
+  ],
+  "config": {"texts": {"window_title": "קטלוג אוצר הספרים"}}
+}

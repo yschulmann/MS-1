@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-קטלוג אוצר הספרים - גרסה 3
+קטלוג ספרים - גרסה 3 (גרסה גנרית)
 פייתון + SQLite, עם ממשק בסגנון חיפוש מודרני ומצב מנהל מלא.
 
 הרצה:               python book_catalog.py
 בדיקה עצמית:        python book_catalog.py --selftest
 אפשרויות:           --port 8765   --browser (פתיחה בדפדפן במקום בחלון)
 איפוס סיסמת מנהל:   python book_catalog.py --reset-password
+התאמה לספרייה:      python book_catalog.py --embed profile.json my_catalog.py
+
+הקובץ הזה גנרי: אין בו שם של ספרייה, מיקומים או נתונים. את הפרטים מקבלים באחת משלוש דרכים:
+  1. פרופיל מוטמע - השורה PROFILE_B64 שלמטה (ממלאים אותה דרך builder.html או --embed).
+  2. קובץ profile.json שמונח ליד קובץ התוכנה.
+  3. אשף הגדרה ראשונית שנפתח בהפעלה הראשונה, אם אין פרופיל.
+מבנה הפרופיל מתואר ב-AGENT.md.
 
 דרישות: פייתון 3.8 ומעלה. החבילה pywebview (חלון עצמאי) מומלצת אך לא חובה -
 בלעדיה התוכנה נפתחת בדפדפן. אין צורך בשום חבילה אחרת (גם לא לייצוא Excel).
 התוכנה מרימה שרת מקומי במחשב שלך בלבד (127.0.0.1).
 הנתונים וההגדרות נשמרים בקובץ catalog.db שבתיקיית הנתונים הקבועה (APPDATA).
-
-מצב מנהל: כפתור המנעול בפינה. בכניסה הראשונה קובעים סיסמה. במצב מנהל אפשר לשנות
-כל דבר: טקסטים, עיצוב, סמל, מסך פתיחה, סוגי חיפוש, שדות, מיקומים, הרשאות ועוד.
-
-עדכוני גרסה (אופליין): במצב מנהל > עדכון גרסה > "בחירת קובץ גרסה חדשה", או הנחת
-הקובץ בתיקיית העדכונים. התוכנה מחליפה את עצמה ונפתחת מחדש; הנתונים לא נפגעים.
 """
+import base64
 import csv
 try:
     import webview
@@ -51,11 +53,52 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 
 
+# ---- פרופיל הספרייה (שם, מיקומים, עיצוב...) ----
+# השורה הבאה היא המקום היחיד שמשתנה בין התקנה להתקנה: JSON של הפרופיל, מקודד ב-base64 (UTF-8).
+PROFILE_B64 = ""
+PROFILE_LINE = re.compile(r'^PROFILE_B64 = "([A-Za-z0-9+/=]*)"[ \t]*\r?$', re.M)
+
+
+def _program_dir():
+    return os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+
+
+def load_profile():
+    """הפרופיל המוטמע, ומעליו profile.json שליד קובץ התוכנה (אם קיים). פרופיל פגום = בלי פרופיל."""
+    prof = {}
+    if PROFILE_B64:
+        try:
+            prof = json.loads(base64.b64decode(PROFILE_B64).decode("utf-8"))
+        except Exception:
+            prof = {}
+    try:
+        with io.open(os.path.join(_program_dir(), "profile.json"), encoding="utf-8-sig") as f:
+            extra = json.load(f)
+        if isinstance(extra, dict):
+            prof = {**(prof if isinstance(prof, dict) else {}), **extra}
+    except Exception:
+        pass
+    return prof if isinstance(prof, dict) else {}
+
+
+def embed_profile(source, profile):
+    """מחזיר את קוד התוכנה כשהפרופיל מוטמע בו (profile=None משאיר את הקוד גנרי)."""
+    if not PROFILE_LINE.search(source):
+        raise ValueError("הקובץ אינו קובץ של תוכנת הקטלוג (חסרה השורה PROFILE_B64)")
+    b64 = base64.b64encode(json.dumps(profile, ensure_ascii=False).encode("utf-8")).decode("ascii") if profile else ""
+    return PROFILE_LINE.sub(lambda m: 'PROFILE_B64 = "%s"' % b64, source, count=1)
+
+
+PROFILE = load_profile()
+
+
 def _stable_app_dir():
     """תיקיית נתונים קבועה בפרופיל המשתמש - לא תלויה באיפה קובץ התוכנה עצמו יושב,
     כדי שהקטלוג לא 'ישכח' נתונים כשמריצים עותק/גרסה אחרת של קובץ התוכנה."""
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
-    d = os.path.join(base, "קטלוג ספרים")
+    # app_id בפרופיל = תיקיית נתונים נפרדת, כדי ששתי ספריות במחשב אחד לא יתערבבו
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", str(PROFILE.get("app_id") or "")).strip(" .")[:60]
+    d = os.path.join(base, name or "קטלוג ספרים")
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -111,15 +154,8 @@ def save_update_dir(path):
     os.replace(tmp, SETTINGS_PATH)
 
 
-# מיקום נקבע לפי מספר המדף: (שם, ממדף, עד מדף, אות). מדף שיש בו את האות - שייך למיקום הזה.
-DEFAULT_LOCATION_RULES = [
-    ("אויצר", 1, 399, ""),
-    ("עזרת נשים", 400, 700, ""),
-    ("ארכיון", 900, 999, ""),
-    ("פרוזדור", None, None, "פ"),
-]
-DEFAULT_LOCATIONS = [r[0] for r in DEFAULT_LOCATION_RULES]
-CONDITIONS = ["חדש ממש", "חדש", "תקין", "תקין - לא כרוך", "תיקון קל", "זקוק לתיקון", "ארכיון"]
+# בגרסה הגנרית אין מיקומים מוגדרים מראש: הם מגיעים מהפרופיל, מאשף ההגדרה או ממצב מנהל.
+# כל מיקום: שם, טווח מדפים (ממדף-עד מדף) ו/או אות - מדף שכתובה בו האות שייך למיקום הזה.
 
 TEXT_FIELDS = ["title", "first_name", "last_name", "volume", "subject", "topics", "content",
                "cond", "location", "publisher", "pub_place", "pub_year", "notes",
@@ -176,7 +212,7 @@ def parse_shelf(raw):
     s = _QUOTES.sub("", s)
     m = _SHELF_RE.match(s)
     if not m or not 1 <= int(m.group(1)) <= 999:
-        raise ValueError("מדף: מספר שלם בין 1 ל-999, ואפשר להוסיף אות, למשל 101-א (האות פ = פרוזדור)")
+        raise ValueError("מדף: מספר שלם בין 1 ל-999, ואפשר להוסיף אות, למשל 101-א")
     return int(m.group(1)), m.group(2).upper()
 
 
@@ -267,8 +303,8 @@ def default_config():
                 "form": True, "public": True, "export": True}
     return {
         "texts": {
-            "app_title": "אוצר הספרים", "window_title": "קטלוג אוצר הספרים",
-            "tagline": "כל ספרי האוצר — במרחק חיפוש אחד",
+            "app_title": "קטלוג ספרים", "window_title": "קטלוג ספרים",
+            "tagline": "",
             "search_placeholder": "חיפוש בקטלוג…", "btn_search": "חיפוש", "btn_adv": "חיפוש מתקדם",
             "btn_add": "ספר חדש", "home_types_caption": "במה לחפש?", "home_locations_caption": "דפדוף לפי מיקום",
             "empty_title": "לא נמצאו ספרים התואמים לחיפוש",
@@ -305,10 +341,8 @@ def default_config():
         "home": {"show_locations": True, "show_count": True, "show_capacity_bar": False},
         "fields": {k: fld(k, h) for k, h in FIELD_DEFS},
         "conditions": [
-            {"name": "חדש ממש", "color": "#1F7A3A"}, {"name": "חדש", "color": "#1F7A3A"},
-            {"name": "תקין", "color": "#2E6F8E"}, {"name": "תקין - לא כרוך", "color": "#8A6D00"},
-            {"name": "תיקון קל", "color": "#B45F06"}, {"name": "זקוק לתיקון", "color": "#A61C1C"},
-            {"name": "ארכיון", "color": "#5B5B5B"},
+            {"name": "חדש", "color": "#1F7A3A"}, {"name": "טוב", "color": "#2E6F8E"},
+            {"name": "בינוני", "color": "#8A6D00"}, {"name": "דורש תיקון", "color": "#A61C1C"},
         ],
         "locations": {"auto": True},
         "perms": {k: d for k, _, d in PERM_DEFS},
@@ -317,6 +351,31 @@ def default_config():
                     "window_w": 1200, "window_h": 820, "maximized": True,
                     "update_check_min": 15, "confirm_quit": True},
     }
+
+
+def profile_config(p):
+    """הופך פרופיל להגדרות: השדות הקצרים (name, tagline, emoji, preset, conditions) ומעליהם config."""
+    if not isinstance(p, dict):
+        return {}
+    c = copy.deepcopy(p.get("config")) if isinstance(p.get("config"), dict) else {}
+    texts = c.setdefault("texts", {}) if isinstance(c.get("texts", {}), dict) else {}
+    name = str(p.get("name") or "").strip()
+    if name:
+        texts.setdefault("app_title", name)
+        texts.setdefault("window_title", name)
+    if p.get("tagline") is not None:
+        texts.setdefault("tagline", str(p["tagline"]))
+    if p.get("emoji"):
+        c.setdefault("logo", {}).setdefault("emoji", str(p["emoji"]))
+    if p.get("preset") in THEME_PRESETS:
+        th = c.setdefault("theme", {})
+        th.setdefault("preset", p["preset"])
+        th.setdefault("colors", dict(THEME_PRESETS[p["preset"]]["colors"]))
+    if isinstance(p.get("conditions"), list) and p["conditions"]:
+        palette = ["#1F7A3A", "#2E6F8E", "#8A6D00", "#B45F06", "#A61C1C", "#5B5B5B"]
+        c.setdefault("conditions", [x if isinstance(x, dict) else {"name": str(x), "color": palette[i % len(palette)]}
+                                    for i, x in enumerate(p["conditions"])])
+    return c
 
 
 def merge_config(base, over):
@@ -485,8 +544,11 @@ def read_xlsx(data):
 #                           שכבת הנתונים
 # =====================================================================
 class Catalog:
-    def __init__(self, path=DB_PATH):
+    def __init__(self, path=DB_PATH, profile=None):
+        """profile: פרופיל הספרייה. ברירת המחדל - הפרופיל של קובץ התוכנה (רק למסד הראשי)."""
         self.path = path
+        self._file_profile = (PROFILE if path == DB_PATH else {}) if profile is None else profile
+        self._profile = self._defaults = None
         self.con = sqlite3.connect(path, check_same_thread=False)
         self.con.row_factory = sqlite3.Row
         self.lock = threading.RLock()
@@ -496,7 +558,7 @@ class Catalog:
 
     # ---------- סכמה ומיגרציה ----------
     def _init_schema(self):
-        self._cfg = self._rules = None
+        self._cfg = self._rules = self._profile = self._defaults = None
         norm_cols = ",\n".join(f"{c} TEXT NOT NULL DEFAULT ''"
                                for c in FIELD_NORM.values() if c != "title_norm")
         self.con.executescript(f"""
@@ -563,13 +625,17 @@ class Catalog:
         CREATE INDEX IF NOT EXISTS ix_loc_shelf ON books(location, shelf, shelf_sub);
         CREATE INDEX IF NOT EXISTS ix_parent ON books(parent_id);
         """)
+        # הפרופיל של קובץ התוכנה נשמר במסד, כדי שיישאר גם אחרי עדכון לקובץ גנרי
+        if self._file_profile and not self._get_setting("profile"):
+            self._set_setting("profile", self._file_profile)
+        rules = self._profile_rules(self.profile)
         if self.con.execute("SELECT COUNT(*) FROM locations").fetchone()[0] == 0:
-            for i, (name, a, b, letter) in enumerate(DEFAULT_LOCATION_RULES):
+            for i, (name, a, b, letter) in enumerate(rules):
                 self.con.execute("INSERT INTO locations(name,pos,shelf_from,shelf_to,letter) VALUES(?,?,?,?,?)",
                                  (name, i, a, b, letter))
-        elif new_rules:
-            # מסד מגרסה קודמת: קובעים את טווחי המדפים למיקומים הקבועים ומעדכנים את מיקומי הספרים
-            for i, (name, a, b, letter) in enumerate(DEFAULT_LOCATION_RULES):
+        elif new_rules and rules:
+            # מסד מגרסה קודמת: קובעים את טווחי המדפים למיקומים שבפרופיל ומעדכנים את מיקומי הספרים
+            for i, (name, a, b, letter) in enumerate(rules):
                 if self.con.execute("SELECT 1 FROM locations WHERE name=?", (name,)).fetchone():
                     self.con.execute("UPDATE locations SET shelf_from=?,shelf_to=?,letter=? WHERE name=?",
                                      (a, b, letter, name))
@@ -604,16 +670,94 @@ class Catalog:
                 self.con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
                                  (key, json.dumps(value, ensure_ascii=False)))
 
+    # ---------- פרופיל הספרייה ----------
+    @property
+    def profile(self):
+        if self._profile is None:
+            p = self._get_setting("profile") or self._file_profile or {}
+            self._profile = p if isinstance(p, dict) else {}
+        return self._profile
+
+    @classmethod
+    def _profile_rules(cls, profile):
+        """המיקומים שבפרופיל כרשימת (שם, ממדף, עד מדף, אות). שורה לא תקינה מדולגת."""
+        out, seen = [], set()
+        for l in profile.get("locations") or []:
+            if not isinstance(l, dict):
+                continue
+            name = str(l.get("name") or "").strip()
+            if not name or name in seen:
+                continue
+            try:
+                a, b, letter = cls._rule(l)
+            except ValueError:
+                a = b = None
+                letter = ""
+            seen.add(name)
+            out.append((name, a, b, letter))
+        return out
+
+    def defaults(self):
+        """ברירות המחדל של ההתקנה הזו: ההגדרות הגנריות, ומעליהן הפרופיל."""
+        if self._defaults is None:
+            d = merge_config(default_config(), profile_config(self.profile))
+            try:
+                self._validate_config(d)
+            except ValueError:
+                d = default_config()
+            self._defaults = d
+        return copy.deepcopy(self._defaults)
+
+    def needs_setup(self):
+        """התקנה חדשה בלי פרופיל ובלי נתונים: בהפעלה הראשונה נפתח אשף ההגדרה."""
+        return not (self.profile or self._get_setting("setup_done") or self.has_password()
+                    or self._get_setting("config") or self.count())
+
+    def apply_setup(self, d, password=None):
+        """שומר את תשובות אשף ההגדרה כפרופיל הספרייה (שם, משפט, ערכת צבעים, מיקומים) וסיסמת מנהל."""
+        prof = {}
+        if not d.get("skip"):
+            for k, n in (("name", 60), ("tagline", 200), ("emoji", 8)):
+                v = str(d.get(k) or "").strip()[:n]
+                if v:
+                    prof[k] = v
+            if d.get("preset") in THEME_PRESETS:
+                prof["preset"] = d["preset"]
+            locs = []
+            for l in d.get("locations") or []:
+                name = str((l or {}).get("name") or "").strip() if isinstance(l, dict) else ""
+                if not name:
+                    continue
+                a, b, letter = self._rule(l)          # שגיאה בטווח עוצרת את האשף עם הסבר
+                locs.append({"name": name, "shelf_from": a, "shelf_to": b, "letter": letter})
+            if len({l["name"] for l in locs}) != len(locs):
+                raise ValueError("יש שני מיקומים באותו שם")
+            if locs:
+                prof["locations"] = locs
+            if password:
+                self.set_password(password)
+        if prof:
+            self._set_setting("profile", prof)
+        self._set_setting("setup_done", True)
+        self._profile = self._defaults = self._cfg = self._rules = None
+        known = set(self.locations())
+        with self.con:
+            for name, a, b, letter in self._profile_rules(prof):
+                if name not in known:
+                    self.con.execute("INSERT INTO locations(name,pos,shelf_from,shelf_to,letter) VALUES(?,?,?,?,?)",
+                                     (name, self._next_pos(), a, b, letter))
+        return prof
+
     @property
     def cfg(self):
         if self._cfg is None:
-            self._cfg = merge_config(default_config(), self._get_setting("config", {}))
+            self._cfg = merge_config(self.defaults(), self._get_setting("config", {}))
         return self._cfg
 
     def save_config(self, new):
         if not isinstance(new, dict):
             raise ValueError("הגדרות לא תקינות")
-        cfg = merge_config(default_config(), merge_config_keep(self.cfg, new))
+        cfg = merge_config(self.defaults(), merge_config_keep(self.cfg, new))
         self._validate_config(cfg)
         self._set_setting("config", cfg)
         self._cfg = None
@@ -622,12 +766,12 @@ class Catalog:
     def reset_config(self, section=None):
         if section:
             cfg = copy.deepcopy(self.cfg)
-            d = default_config()
+            d = self.defaults()
             if section not in d:
                 raise ValueError("אין קטגוריית הגדרות כזו")
             cfg[section] = d[section]
         else:
-            cfg = default_config()
+            cfg = self.defaults()
         self._set_setting("config", cfg)
         self._cfg = None
         return self.cfg
@@ -1117,7 +1261,7 @@ class Catalog:
                 for r in self.con.execute("SELECT * FROM locations ORDER BY pos, name")]
 
     def locate(self, shelf, sub=""):
-        """המיקום של מדף לפי הכללים: קודם אות (למשל פ = פרוזדור), ואחר כך טווח מספרים."""
+        """המיקום של מדף לפי הכללים: קודם אות, ואחר כך טווח מספרים."""
         if shelf is None:
             return None
         if self._rules is None:
@@ -1411,7 +1555,7 @@ class Catalog:
                 self.con.execute("DELETE FROM assets")
                 self.con.executemany("INSERT INTO settings(key,value) VALUES(?,?)", keep[0])
                 self.con.executemany("INSERT INTO assets(name,mime,data,updated) VALUES(?,?,?,?)", keep[1])
-            self._cfg = None
+            self._cfg = self._profile = self._defaults = None
 
     def auto_backup(self, keep=None):
         """גיבוי אוטומטי אחד ליום; נשמרים keep האחרונים."""
@@ -1738,6 +1882,7 @@ class Updater:
             with self.lock:
                 self.state = "installing"
                 self.progress = 100
+            self._carry_profile(exe, part)
             self._swap(exe, part)
         finally:
             if os.path.exists(part):
@@ -1745,6 +1890,24 @@ class Updater:
                     os.remove(part)
                 except OSError:
                     pass
+
+    @staticmethod
+    def _carry_profile(current, new):
+        """עדכון מקובץ py גנרי: הפרופיל שמוטמע בקובץ המותקן מועתק לקובץ החדש, כדי ששם הספרייה
+        ותיקיית הנתונים לא ישתנו. אם בקובץ החדש כבר מוטמע פרופיל - הוא נשאר."""
+        if not current.lower().endswith(".py"):
+            return
+        try:
+            with io.open(current, encoding="utf-8") as f:
+                old = PROFILE_LINE.search(f.read())
+            with io.open(new, encoding="utf-8", newline="") as f:
+                src = f.read()
+            cur = PROFILE_LINE.search(src)
+            if old and old.group(1) and cur and not cur.group(1):
+                with io.open(new, "w", encoding="utf-8", newline="") as f:
+                    f.write(PROFILE_LINE.sub(lambda m: old.group(0).rstrip("\r"), src, count=1))
+        except (OSError, UnicodeDecodeError):
+            pass
 
     def _copy(self, m, dest):
         """מעתיק את קובץ העדכון (המקור נשאר שלם בתיקיית העדכונים) ומאמת אותו תוך כדי."""
@@ -2077,7 +2240,7 @@ class Handler(BaseHTTPRequestHandler):
                 "perm_defs": [[k, t] for k, t, _ in PERM_DEFS],
                 "field_defs": FIELD_DEFS, "views": VIEW_NAMES, "sorts": SORT_NAMES,
                 "search_fields": SEARCH_FIELD_CHOICES, "windowed": RUN.get("window") is not None,
-                "defaults": default_config(),
+                "defaults": cat.defaults(), "needs_setup": cat.needs_setup(),
             }
 
     def _handle(self, method):
@@ -2130,6 +2293,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/logout":
             sess.drop(self.token)
             return self._json({"ok": True})
+        if path == "/api/admin/wizard":       # אשף ההגדרה הראשונית (רק בהתקנה חדשה וריקה)
+            with cat.lock:
+                if not cat.needs_setup():
+                    raise Forbidden()
+                pw = str(d.get("password") or "")
+                cat.apply_setup(d, pw or None)
+                minutes = cat.cfg["admin"]["timeout_min"]
+                self.admin = bool(pw) and not d.get("skip")
+                tok = sess.create(minutes) if self.admin else ""
+                return self._json({**self._boot(cat), "token": tok})
         if path == "/api/admin/setup":        # קביעת סיסמה ראשונה
             with cat.lock:
                 if cat.has_password():
@@ -2804,6 +2977,26 @@ body.wide{--pad:1.35}
   <div class="acts"><button class="btn primary" id="loginGo" type="button">כניסה</button><button class="btn" id="loginCancel" type="button">ביטול</button></div>
 </div></dialog>
 
+<!-- אשף הגדרה ראשונית (התקנה חדשה בלי פרופיל) -->
+<dialog id="wizDlg"><div class="in">
+  <h2>ברוכים הבאים — הגדרה ראשונית</h2>
+  <p class="cap">כמה פרטים על הספרייה, ואפשר להתחיל. את הכול אפשר לשנות אחר כך במצב מנהל.</p>
+  <div class="fgrid">
+    <label class="full">שם הספרייה (יופיע ככותרת התוכנה) *<input id="w_name"></label>
+    <label class="full">משפט מתחת לכותרת (לא חובה)<input id="w_tagline"></label>
+    <label>סימן ליד הכותרת<input id="w_emoji" value="📚"></label>
+    <label>ערכת צבעים<select id="w_preset"></select></label>
+  </div>
+  <h4 style="margin:1em 0 .2em">מיקומים ומדפים (לא חובה)</h4>
+  <p class="hint">המיקום של ספר נקבע לפי מספר המדף שלו: לכל מיקום טווח מדפים, או אות שנכתבת ליד מספר המדף.</p>
+  <table class="s"><thead><tr><th>שם המיקום</th><th style="width:6.5em">ממדף</th><th style="width:6.5em">עד מדף</th><th style="width:5.5em">אות</th></tr></thead><tbody id="w_locs"></tbody></table>
+  <div class="acts" style="margin-top:.4em"><button class="btn sm" id="wizAddLoc" type="button">＋ מיקום נוסף</button></div>
+  <h4 style="margin:1em 0 .2em">סיסמת מנהל *</h4>
+  <div class="fgrid"><label>סיסמה (לפחות 4 תווים)<input id="w_pw" type="password" autocomplete="off"></label><label>אימות הסיסמה<input id="w_pw2" type="password" autocomplete="off"></label></div>
+  <div class="err" id="wizErr"></div>
+  <div class="acts"><button class="btn primary" id="wizGo" type="button">סיום והתחלה</button><button class="btn sp" id="wizSkip" type="button">דילוג — אגדיר אחר כך</button></div>
+</div></dialog>
+
 <!-- הגדרות (מצב מנהל) -->
 <dialog id="adm">
   <div id="admHead"><h2>⚙ הגדרות התוכנה — מצב מנהל</h2><button class="btn sm" id="admLock" type="button">🔒 יציאה ממצב מנהל</button><button class="btn sm" id="admX" type="button">✕ סגירה</button></div>
@@ -2996,6 +3189,7 @@ async function loadMeta(){
   fillSelects();
   const rng=l=>[l.shelf_from!=null?`מדפים ${l.shelf_from}–${l.shelf_to}`:'',l.letter?`אות ${l.letter}`:''].filter(Boolean).join(' · ');
   $('#homeChips').innerHTML=m.locations.map(l=>`<button class="chip" data-loc="${esc(l.name)}">${esc(l.name)}<small>${num(l.count)} ספרים${rng(l)?' · '+rng(l):''}</small></button>`).join('');
+  if(!m.locations.length)$('#homeLocs').hidden=true; else buildBars();
   $('#homeBar').style.width=Math.min(100,m.count/m.capacity*100)+'%';
   const txt=`${num(m.count)} ספרים בקטלוג`+(m.annex_count?` · מתוכם ${num(m.annex_count)} נספחים`:'');
   $('#homeCount').textContent=txt;
@@ -3550,6 +3744,37 @@ function showSplash(c,force){
   setTimeout(close,Math.max(1,sp.seconds)*1000);
 }
 
+/* ---------- אשף הגדרה ראשונית ---------- */
+function openWizard(){
+  $('#w_preset').innerHTML=Object.entries(B.presets).map(([k,p])=>`<option value="${k}">${esc(p.name)}</option>`).join('');
+  $('#w_preset').value=C.theme.preset in B.presets?C.theme.preset:'parchment';
+  const row=()=>$('#w_locs').insertAdjacentHTML('beforeend','<tr><td><input class="ln"></td><td><input class="lf" type="number" min="1" max="999"></td><td><input class="lt" type="number" min="1" max="999"></td><td><input class="ll" maxlength="6" style="width:4.5em"></td></tr>');
+  $('#w_locs').innerHTML=''; row(); row();
+  $('#wizAddLoc').onclick=row;
+  $('#w_preset').onchange=()=>{const t=clone(C);t.theme.colors=clone(B.presets[$('#w_preset').value].colors);applyTheme(t);};
+  $('#w_name').oninput=()=>{$('#logoTxt').textContent=$('#w_name').value||T('app_title');};
+  $('#wizDlg').addEventListener('cancel',e=>e.preventDefault());
+  $('#wizGo').onclick=()=>wizSubmit(false); $('#wizSkip').onclick=()=>wizSubmit(true);
+  $('#wizDlg').showModal(); $('#w_name').focus();
+}
+async function wizSubmit(skip){
+  const er=$('#wizErr'); er.textContent=''; let body={skip:true};
+  if(!skip){
+    body={name:$('#w_name').value.trim(),tagline:$('#w_tagline').value.trim(),emoji:$('#w_emoji').value.trim(),preset:$('#w_preset').value,password:$('#w_pw').value,
+      locations:$$('#w_locs tr').map(tr=>({name:tr.querySelector('.ln').value.trim(),shelf_from:tr.querySelector('.lf').value,shelf_to:tr.querySelector('.lt').value,letter:tr.querySelector('.ll').value.trim()})).filter(l=>l.name)};
+    if(!body.name){er.textContent='יש להקליד את שם הספרייה';$('#w_name').focus();return;}
+    if(body.password.length<4){er.textContent='יש לקבוע סיסמת מנהל (לפחות 4 תווים)';$('#w_pw').focus();return;}
+    if(body.password!==$('#w_pw2').value){er.textContent='שתי הסיסמאות אינן זהות';return;}
+  }
+  try{
+    const r=await send('POST','/api/admin/wizard',body);
+    Object.assign(B,r); C=B.cfg; $('#wizDlg').close();
+    if(r.token)setAdmin(true,r.token);
+    rebuild(); await loadMeta();
+    toast(skip?'אפשר להגדיר את הספרייה בכל עת: כפתור המנעול > מצב מנהל':'הספרייה הוגדרה. כעת אפשר לייבא קטלוג או להוסיף ספרים.',skip?null:[['ייבוא מקובץ',()=>openImport()]],9000);
+  }catch(e){er.textContent=e.message;applyTheme(C);}
+}
+
 /* ---------- ייבוא ---------- */
 function openImport(){
   $('#impCols').textContent='שורת הכותרת בקובץ קובעת את העמודות: '+FKEYS.map(fl).join(', ')+". מספיקה עמודה אחת - "+fl('title')+". העמודות \"מס'\" ו\"מס' הספר הראשי\" (אם קיימות) קושרות נספח לספר הראשי שלו.";
@@ -3712,6 +3937,7 @@ $('#updBar').onclick=async e=>{
   if(TOKEN){try{const b=await api('/api/boot');Object.assign(B,b);C=B.cfg;ADMIN=!!b.admin;if(!ADMIN)TOKEN='';}catch(_){TOKEN='';}}
   applyTexts(C); buildTypes(); buildAdv(); buildForm(); buildMenu(); buildBars(); setMode(false);
   await loadMeta(); $('#q').focus();
+  if(B.needs_setup)openWizard();
   updStart(); setInterval(updStart,Math.max(1,C.general.update_check_min)*60000);
 })();
 
@@ -3771,6 +3997,17 @@ def main():
 
     if "--selftest" in sys.argv:
         sys.exit(selftest())
+
+    if "--embed" in sys.argv:       # python book_catalog.py --embed profile.json out.py
+        i = sys.argv.index("--embed")
+        with io.open(sys.argv[i + 1], encoding="utf-8-sig") as f:
+            prof = json.load(f)
+        with io.open(os.path.abspath(__file__), encoding="utf-8", newline="") as f:
+            src = f.read()
+        with io.open(sys.argv[i + 2], "w", encoding="utf-8", newline="") as f:
+            f.write(embed_profile(src, prof))
+        print("נוצר:", sys.argv[i + 2])
+        return
 
     if "--reset-password" in sys.argv:
         cat = Catalog()
@@ -3860,15 +4097,22 @@ def main():
 # =====================================================================
 #                           בדיקה עצמית
 # =====================================================================
+TEST_PROFILE = {"name": "ספריית בדיקה", "tagline": "משפט בדיקה", "locations": [
+    {"name": "אולם א", "shelf_from": 1, "shelf_to": 399}, {"name": "אולם ב", "shelf_from": 400, "shelf_to": 700},
+    {"name": "ארכיון", "shelf_from": 900, "shelf_to": 999}, {"name": "מסדרון", "letter": "פ"}]}
+DEFAULT_LOCATIONS = [l["name"] for l in TEST_PROFILE["locations"]]
+CONDITIONS = ["חדש", "טוב", "בינוני", "דורש תיקון"]
+
+
 def selftest():
     import random
     tmp = tempfile.mkdtemp()
-    cat = Catalog(os.path.join(tmp, "t.db"))
+    cat = Catalog(os.path.join(tmp, "t.db"), profile=TEST_PROFILE)
     cat.save_config({"perms": {k: True for k, _, _ in PERM_DEFS}})   # הבדיקות הישנות: הכול פתוח
     first = ["משה", "אברהם", "יצחק", "יעקב", "שמואל", "דוד", "חיים", "יוסף"]
     last = ["כהן", "לוי", "פרידמן", "גולדברג", "רוזנברג", "אברמוביץ", "שפירא", "קליין"]
     subj = ["הלכה", "גמרא", "מוסר", "מחשבה", "היסטוריה", "פרשנות", "חסידות", "שו\"ת"]
-    pubs = ["מוסד הרב קוק", "הוצאת פלדהיים", "אוצר הספרים", "מכון ירושלים"]
+    pubs = ["מוסד הרב קוק", "הוצאת פלדהיים", "הוצאת ספרים", "מכון ירושלים"]
     random.seed(1)
     t = time.time()
     batch = []
@@ -3904,7 +4148,7 @@ def selftest():
     assert all(r["shelf"] == 101 and r["shelf_sub"] == "א" for r in rows)
     r1, t1 = timed("shelf 101 (incl. splits)", {"shelf": "101"})
     assert all(r["shelf"] == 101 for r in r1)
-    timed("shelf range+location", {"location": "אויצר", "shelf_from": "100", "shelf_to": "120"})
+    timed("shelf range+location", {"location": "אולם א", "shelf_from": "100", "shelf_to": "120"})
     timed("sort by author (page 500)", {"sort": "author"}, offset=10000)
     rows, _ = timed("sort by shelf", {"sort": "shelf"}, limit=3000)
     order = [(r["shelf"], r["shelf_sub"]) for r in rows]
@@ -3948,7 +4192,7 @@ def selftest():
       location TEXT NOT NULL DEFAULT '',shelf INTEGER,notes TEXT NOT NULL DEFAULT '',added TEXT,updated TEXT,
       title_norm TEXT NOT NULL DEFAULT '',author_norm TEXT NOT NULL DEFAULT '',search TEXT NOT NULL DEFAULT '');
       CREATE TABLE locations(name TEXT PRIMARY KEY,pos INTEGER NOT NULL DEFAULT 0);
-      INSERT INTO books(title,first_name,last_name,shelf,location) VALUES('ספר מגרסה ראשונה','דוד','לוי',5,'אויצר');""")
+      INSERT INTO books(title,first_name,last_name,shelf,location) VALUES('ספר מגרסה ראשונה','דוד','לוי',5,'אולם א');""")
     c.commit(); c.close()
     mig = Catalog(v1)
     assert mig.query({"q": "דוד", "field": "first_name"})[1] == 1
@@ -3973,7 +4217,7 @@ def selftest():
     st, body = call("GET", "/api/search?q=" + urllib.request.quote("משה") + "&field=first_name&size=5")
     j = json.loads(body)
     assert st == 200 and len(j["rows"]) == 5 and j["total"] > 100
-    payload = json.dumps(dict(title="ספר דרך HTTP", shelf="300-ד", location="פרוזדור")).encode()
+    payload = json.dumps(dict(title="ספר דרך HTTP", shelf="300-ד", location="מסדרון")).encode()
     st, body = call("POST", "/api/book", payload, {"Content-Type": "application/json"})
     assert st == 200, body
     st, body = call("POST", "/api/book", payload, {"Content-Type": "application/json"})
@@ -3991,6 +4235,7 @@ def selftest():
     print("HTTP end-to-end OK")
     srv.shutdown()
     selftest_v3(tmp)
+    selftest_generic(tmp)
     selftest_update()
     print("ALL TESTS PASSED")
     cat.close()
@@ -4000,15 +4245,15 @@ def selftest():
 
 def selftest_v3(tmp):
     """בדיקות לגרסה 3: מיקום לפי מדף, נספחים, Excel, מצב מנהל והרשאות, עדכון מקובץ py."""
-    cat = Catalog(os.path.join(tmp, "v3.db"))
+    cat = Catalog(os.path.join(tmp, "v3.db"), profile=TEST_PROFILE)
     # --- מיקום לפי מדף ---
-    for shelf, want in (("5", "אויצר"), ("399", "אויצר"), ("400", "עזרת נשים"), ("700", "עזרת נשים"),
-                        ("950", "ארכיון"), ("250-פ", "פרוזדור"), ("950פ", "פרוזדור")):
+    for shelf, want in (("5", "אולם א"), ("399", "אולם א"), ("400", "אולם ב"), ("700", "אולם ב"),
+                        ("950", "ארכיון"), ("250-פ", "מסדרון"), ("950פ", "מסדרון")):
         bid = cat.add(dict(title="מיקום " + shelf, shelf=shelf, location="משהו אחר"))
         assert cat.get(bid)["location"] == want, (shelf, cat.get(bid)["location"])
     bid = cat.add(dict(title="בלי כלל", shelf="800", location="מחסן"))
     assert cat.get(bid)["location"] == "מחסן"
-    cat.rename_location("אויצר", "אויצר", {"shelf_from": "1", "shelf_to": "300", "letter": ""})
+    cat.rename_location("אולם א", "אולם א", {"shelf_from": "1", "shelf_to": "300", "letter": ""})
     cat.add_location("אולם", {"shelf_from": "301", "shelf_to": "399"})
     assert cat.apply_location_rules() == 1 and cat.query({"location": "אולם"})[1] == 1
     for bad in ({"shelf_from": "5"}, {"shelf_from": "9", "shelf_to": "3"}, {"shelf_from": "0", "shelf_to": "3"}):
@@ -4048,7 +4293,7 @@ def selftest_v3(tmp):
         assert res["imported"] == before and c2.count() == before, res
         r2, t2 = c2.query({"q": "ברכת שמעון"}, group=True)
         assert t2 == 1 and r2[0]["title"] == "אבני מילואים" and r2[0]["last_name"] == "הלר", r2
-        assert c2.query({"annex": "1"})[1] == 3 and c2.query({"location": "פרוזדור"})[1] == 2
+        assert c2.query({"annex": "1"})[1] == 3 and c2.query({"location": "מסדרון"})[1] == 2
         res = c2.import_file(blob, "update")
         assert res["imported"] == 0 and res["updated"] == before and c2.count() == before, res
         c2.close()
@@ -4171,6 +4416,79 @@ def selftest_v3(tmp):
     except ValueError:
         pass
     print("Version 3 features OK")
+
+
+def selftest_generic(tmp):
+    """הגרסה הגנרית: בלי פרופיל אין שם ואין מיקומים; אשף ההגדרה; הטמעת פרופיל בקובץ התוכנה."""
+    g = Catalog(os.path.join(tmp, "generic.db"))
+    assert g.needs_setup() and g.locations() == [] and g.profile == {}
+    assert g.cfg["texts"]["app_title"] == "קטלוג ספרים" and g.cfg["texts"]["tagline"] == ""
+    srv = make_server(g, 0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def call(method, path, obj=None, tok=""):
+        req = urllib.request.Request(base + path, method=method, headers={"X-Token": tok} if tok else {},
+                                     data=json.dumps(obj).encode() if obj is not None else None)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return 200, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+    assert call("GET", "/api/boot")[1]["needs_setup"] is True
+    answers = {"name": "בית המדרש הגדול", "tagline": "ספרייה תורנית", "preset": "royal", "password": "abcd1",
+               "locations": [{"name": "אולם ראשי", "shelf_from": "1", "shelf_to": "500"},
+                             {"name": "מרתף", "letter": "מ"}, {"name": ""}]}
+    bad = dict(answers, locations=[{"name": "רע", "shelf_from": "9", "shelf_to": "2"}])
+    assert call("POST", "/api/admin/wizard", bad)[0] == 400 and g.needs_setup()
+    st, j = call("POST", "/api/admin/wizard", answers)
+    assert st == 200 and j["token"] and j["admin"] and not j["needs_setup"], j
+    assert j["cfg"]["texts"]["app_title"] == "בית המדרש הגדול" and j["cfg"]["texts"]["tagline"] == "ספרייה תורנית"
+    assert j["cfg"]["theme"]["colors"] == THEME_PRESETS["royal"]["colors"]
+    assert j["defaults"]["texts"]["app_title"] == "בית המדרש הגדול"            # איפוס חוזר לפרופיל, לא לגנרי
+    assert call("POST", "/api/admin/wizard", answers)[0] == 403                 # האשף רץ פעם אחת בלבד
+    assert call("PUT", "/api/config", {"texts": {"footer": "x"}}, j["token"])[0] == 200
+    assert g.locations() == ["אולם ראשי", "מרתף"] and g.check_password("abcd1")
+    assert g.get(g.add(dict(title="א", shelf="12")))["location"] == "אולם ראשי"
+    assert g.get(g.add(dict(title="ב", shelf="12-מ")))["location"] == "מרתף"
+    assert g.get(g.add(dict(title="ג", shelf="700")))["location"] == ""
+    srv.shutdown()
+    g.close()
+    g = Catalog(os.path.join(tmp, "generic.db"))                               # נשמר להפעלה הבאה
+    assert g.cfg["texts"]["app_title"] == "בית המדרש הגדול" and not g.needs_setup()
+    g.close()
+    s2 = Catalog(os.path.join(tmp, "skip.db"))
+    s2.apply_setup({"skip": True, "name": "לא אמור להישמר"}, "abcd1")
+    assert not s2.needs_setup() and s2.profile == {} and not s2.has_password()
+    s2.close()
+    # --- פרופיל מוטמע בקובץ התוכנה ---
+    with io.open(os.path.abspath(__file__), encoding="utf-8", newline="") as f:
+        src = f.read()
+    generic = embed_profile(src, None)
+    custom = embed_profile(generic, TEST_PROFILE)
+    compile(custom, "custom.py", "exec")
+    assert custom != generic and embed_profile(custom, None) == generic
+    got = json.loads(base64.b64decode(PROFILE_LINE.search(custom).group(1)).decode("utf-8"))
+    assert got == TEST_PROFILE and PROFILE_LINE.search(generic).group(1) == ""
+    cfg = merge_config(default_config(), profile_config(
+        {"name": "ישיבה", "preset": "night", "conditions": ["חדש", "ישן"], "config": {"texts": {"app_title": "גובר"}}}))
+    assert cfg["texts"]["app_title"] == "גובר" and cfg["texts"]["window_title"] == "ישיבה"
+    assert cfg["theme"]["colors"]["bg"] == THEME_PRESETS["night"]["colors"]["bg"]
+    assert [c["name"] for c in cfg["conditions"]] == ["חדש", "ישן"]
+    try:
+        embed_profile("print(1)", TEST_PROFILE)
+        raise SystemExit("embedded into a foreign file")
+    except ValueError:
+        pass
+    # --- עדכון לקובץ גנרי שומר על הפרופיל המוטמע ---
+    cur, new = os.path.join(tmp, "cur.py"), os.path.join(tmp, "new.py")
+    for path, text in ((cur, custom), (new, generic)):
+        with io.open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+    Updater._carry_profile(cur, new)
+    with io.open(new, encoding="utf-8", newline="") as f:
+        assert f.read() == custom
+    print("Generic edition OK")
 
 
 def selftest_update():
