@@ -20,6 +20,8 @@ label{display:flex;flex-direction:column;gap:3px;font-size:.88rem;font-weight:60
 input,select,button{font:inherit;color:inherit}
 input,select{border:1.5px solid var(--line);border-radius:8px;padding:.45em .6em;background:var(--panel);color:var(--fg);font-weight:400;min-width:0;width:100%}
 input:focus,select:focus{outline:3px solid color-mix(in srgb,var(--accent) 40%,transparent);border-color:var(--accent)}
+label.ck{flex-direction:row;align-items:flex-start;gap:.5em;color:var(--fg);font-size:.98rem;font-weight:500;margin:.25em 0}
+label.ck input{width:1.1em;height:1.1em;margin-top:.3em;flex:none;accent-color:var(--accent)}
 .hint{font-size:.8rem;color:var(--muted);font-weight:400}
 .tblwrap{overflow-x:auto}
 table{border-collapse:collapse;width:100%;min-width:480px}
@@ -64,6 +66,10 @@ code{background:color-mix(in srgb,var(--line) 45%,transparent);border-radius:5px
     <h2>מצבי ספר</h2>
     <label>רשימת המצבים, מופרדים בפסיק<input id="conds" autocomplete="off" placeholder="חדש, טוב, בינוני, דורש תיקון"><span class="hint">לא חובה. ריק = הרשימה הרגילה.</span></label>
 
+    <h2>ספרים</h2>
+    <label class="ck"><input type="radio" name="starter" value="0" checked> קטלוג ריק לגמרי</label>
+    <label class="ck"><input type="radio" name="starter" value="1"> קטלוג בסיסי: 84 ספרי יסוד (חומשים, מקראות גדולות, נ״ך, משניות, ש״ס, רמב״ם, טור, שולחן ערוך, משנה ברורה) — מוחקים מה שלא צריך</label>
+
     <div class="acts">
       <button class="btn primary" id="go" type="button">⬇ הורדת התוכנה</button>
       <button class="btn" id="dlProfile" type="button">הורדת profile.json בלבד</button>
@@ -82,7 +88,7 @@ code{background:color-mix(in srgb,var(--line) 45%,transparent);border-radius:5px
     <ol>
       <li>מתקינים <a href="https://www.python.org/downloads/">פייתון</a> (3.8 ומעלה). מומלץ גם: <code>pip install pywebview</code> — כך התוכנה נפתחת בחלון משלה ולא בדפדפן.</li>
       <li>מפעילים: <code>python book_catalog.py</code></li>
-      <li>לוחצים על המנעול, קובעים סיסמת מנהל, ומייבאים את קטלוג הספרים (Excel או CSV) מתוך ההגדרות.</li>
+      <li>לוחצים על המנעול וקובעים סיסמת מנהל. משם אפשר להוסיף ספרים, לייבא קטלוג קיים (Excel או CSV), ולמחוק ספרים מהקטלוג הבסיסי.</li>
     </ol>
   </div>
 </main>
@@ -120,6 +126,7 @@ function fromUrl(){
   if(locs.length)p.locations=locs;
   const conds=u.getAll('cond').flatMap(s=>s.split(',')).map(s=>s.trim()).filter(Boolean);
   if(conds.length)p.conditions=conds;
+  if(u.has('starter'))p.starter=u.get('starter')==='1';
   return {profile:p,auto:u.get('auto')==='1'};
 }
 let extra={};                                /* שדות מתקדמים מהקישור (config) שאין להם תיבה בטופס */
@@ -129,6 +136,7 @@ function fill(p){
   $('#conds').value=(Array.isArray(p.conditions)?p.conditions:[]).map(c=>typeof c==='object'&&c?c.name:c).filter(Boolean).join(', ');
   $('#locs').innerHTML=''; (Array.isArray(p.locations)?p.locations:[]).forEach(addLoc);
   if(!$('#locs').children.length){addLoc();addLoc();}
+  document.querySelector('input[name=starter][value="'+(p.starter?1:0)+'"]').checked=true;
   extra=p.config&&typeof p.config==='object'?{config:p.config}:{};
 }
 function collect(){
@@ -146,6 +154,7 @@ function collect(){
   }
   if(locs.length)p.locations=locs;
   const conds=v('#conds').split(',').map(s=>s.trim()).filter(Boolean); if(conds.length)p.conditions=conds;
+  if(document.querySelector('input[name=starter]:checked').value==='1')p.starter=true;
   if(!p.name)errs.unshift('יש להקליד את שם הספרייה');
   return {profile:p,errs};
 }

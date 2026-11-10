@@ -353,6 +353,33 @@ def default_config():
     }
 
 
+def starter_books():
+    """קטלוג בסיסי לבחירה בהתקנה חדשה: ספרי היסוד שיש כמעט בכל ספרייה תורנית.
+    אפשר למחוק או לערוך כל ספר אחר כך; מדף ומיקום נשארים ריקים למילוי."""
+    out = []
+
+    def add(title, volumes, subject, topic="", first="", last=""):
+        for v in volumes:
+            out.append({"title": title, "volume": v, "subject": subject, "first_name": first, "last_name": last,
+                        "topics": (topic + " > " + v) if topic else ""})
+    add("חומש", ["בראשית", "שמות", "ויקרא", "במדבר", "דברים"], "תורה", "תנ''ך > תורה")
+    add("מקראות גדולות", ["בראשית", "שמות", "ויקרא", "במדבר", "דברים"], "תורה", "תנ''ך > תורה")
+    add("תנ''ך", ["נביאים ראשונים", "נביאים אחרונים", "כתובים"], "נ''ך", "תנ''ך")
+    add("משניות", ["זרעים", "מועד", "נשים", "נזיקין", "קדשים", "טהרות"], "משנה", "משנה")
+    add("תלמוד בבלי", ["ברכות", "שבת", "עירובין", "פסחים", "שקלים", "יומא", "סוכה", "ביצה", "ראש השנה", "תענית",
+                       "מגילה", "מועד קטן", "חגיגה", "יבמות", "כתובות", "נדרים", "נזיר", "סוטה", "גיטין",
+                       "קידושין", "בבא קמא", "בבא מציעא", "בבא בתרא", "סנהדרין", "מכות", "שבועות",
+                       "עבודה זרה", "הוריות", "זבחים", "מנחות", "חולין", "בכורות", "ערכין", "תמורה",
+                       "כריתות", "מעילה", "נדה"], "ש''ס", "מסכתות > בבלי")
+    add("משנה תורה", ["מדע", "אהבה", "זמנים", "נשים", "קדושה", "הפלאה", "זרעים", "עבודה", "קרבנות", "טהרה",
+                      "נזיקין", "קנין", "משפטים", "שופטים"], "רמב''ם", "רמב''ם", "רבי משה בן מימון", "")
+    add("טור", ["אורח חיים", "יורה דעה", "אבן העזר", "חושן משפט"], "הלכה", "טור", "רבי יעקב בן אשר", "")
+    add("שולחן ערוך", ["אורח חיים", "יורה דעה", "אבן העזר", "חושן משפט"], "הלכה", "שולחן ערוך", "רבי יוסף", "קארו")
+    add("משנה ברורה", ["חלק א", "חלק ב", "חלק ג", "חלק ד", "חלק ה", "חלק ו"], "הלכה", "",
+        "רבי ישראל מאיר הכהן", "מראדין")
+    return out
+
+
 def profile_config(p):
     """הופך פרופיל להגדרות: השדות הקצרים (name, tagline, emoji, preset, conditions) ומעליהם config."""
     if not isinstance(p, dict):
@@ -626,7 +653,8 @@ class Catalog:
         CREATE INDEX IF NOT EXISTS ix_parent ON books(parent_id);
         """)
         # הפרופיל של קובץ התוכנה נשמר במסד, כדי שיישאר גם אחרי עדכון לקובץ גנרי
-        if self._file_profile and not self._get_setting("profile"):
+        first_profile = bool(self._file_profile) and not self._get_setting("profile")
+        if first_profile:
             self._set_setting("profile", self._file_profile)
         rules = self._profile_rules(self.profile)
         if self.con.execute("SELECT COUNT(*) FROM locations").fetchone()[0] == 0:
@@ -648,6 +676,12 @@ class Catalog:
             self.con.execute("DELETE FROM locations WHERE shelf_from IS NULL AND letter='' AND name NOT IN "
                              "(SELECT DISTINCT location FROM books)")
         self.con.commit()
+        if first_profile and self._file_profile.get("starter") and self.count() == 0:
+            self.add_starter()             # הפרופיל ביקש להתחיל עם הקטלוג הבסיסי
+
+    def add_starter(self):
+        """מוסיף את הקטלוג הבסיסי (ספרי היסוד). מחזיר כמה ספרים נוספו."""
+        return self._import(iter(starter_books()), "add")["imported"]
 
     def close(self):
         self.con.close()
@@ -740,6 +774,8 @@ class Catalog:
             self._set_setting("profile", prof)
         self._set_setting("setup_done", True)
         self._profile = self._defaults = self._cfg = self._rules = None
+        if d.get("starter") and not d.get("skip") and self.count() == 0:
+            self.add_starter()
         known = set(self.locations())
         with self.con:
             for name, a, b, letter in self._profile_rules(prof):
@@ -2991,6 +3027,9 @@ body.wide{--pad:1.35}
   <p class="hint">המיקום של ספר נקבע לפי מספר המדף שלו: לכל מיקום טווח מדפים, או אות שנכתבת ליד מספר המדף.</p>
   <table class="s"><thead><tr><th>שם המיקום</th><th style="width:6.5em">ממדף</th><th style="width:6.5em">עד מדף</th><th style="width:5.5em">אות</th></tr></thead><tbody id="w_locs"></tbody></table>
   <div class="acts" style="margin-top:.4em"><button class="btn sm" id="wizAddLoc" type="button">＋ מיקום נוסף</button></div>
+  <h4 style="margin:1em 0 .2em">ספרים</h4>
+  <label class="ck"><input type="radio" name="w_start" value="0" checked> להתחיל עם קטלוג ריק</label>
+  <label class="ck"><input type="radio" name="w_start" value="1"> להתחיל עם קטלוג בסיסי (חומשים, משניות, ש״ס, רמב״ם, טור ושולחן ערוך, משנה ברורה) — מוחקים מה שלא צריך</label>
   <h4 style="margin:1em 0 .2em">סיסמת מנהל *</h4>
   <div class="fgrid"><label>סיסמה (לפחות 4 תווים)<input id="w_pw" type="password" autocomplete="off"></label><label>אימות הסיסמה<input id="w_pw2" type="password" autocomplete="off"></label></div>
   <div class="err" id="wizErr"></div>
@@ -3760,7 +3799,7 @@ function openWizard(){
 async function wizSubmit(skip){
   const er=$('#wizErr'); er.textContent=''; let body={skip:true};
   if(!skip){
-    body={name:$('#w_name').value.trim(),tagline:$('#w_tagline').value.trim(),emoji:$('#w_emoji').value.trim(),preset:$('#w_preset').value,password:$('#w_pw').value,
+    body={name:$('#w_name').value.trim(),tagline:$('#w_tagline').value.trim(),emoji:$('#w_emoji').value.trim(),preset:$('#w_preset').value,password:$('#w_pw').value,starter:document.querySelector('input[name=w_start]:checked').value==='1',
       locations:$$('#w_locs tr').map(tr=>({name:tr.querySelector('.ln').value.trim(),shelf_from:tr.querySelector('.lf').value,shelf_to:tr.querySelector('.lt').value,letter:tr.querySelector('.ll').value.trim()})).filter(l=>l.name)};
     if(!body.name){er.textContent='יש להקליד את שם הספרייה';$('#w_name').focus();return;}
     if(body.password.length<4){er.textContent='יש לקבוע סיסמת מנהל (לפחות 4 תווים)';$('#w_pw').focus();return;}
@@ -4436,7 +4475,10 @@ def selftest_generic(tmp):
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"{}")
     assert call("GET", "/api/boot")[1]["needs_setup"] is True
-    answers = {"name": "בית המדרש הגדול", "tagline": "ספרייה תורנית", "preset": "royal", "password": "abcd1",
+    books = starter_books()
+    assert len(books) == 84 and all(b["title"] and b["volume"] for b in books)
+    assert len({(b["title"], b["volume"]) for b in books}) == len(books)
+    answers = {"name": "בית המדרש הגדול", "tagline": "ספרייה תורנית", "preset": "royal", "password": "abcd1", "starter": True,
                "locations": [{"name": "אולם ראשי", "shelf_from": "1", "shelf_to": "500"},
                              {"name": "מרתף", "letter": "מ"}, {"name": ""}]}
     bad = dict(answers, locations=[{"name": "רע", "shelf_from": "9", "shelf_to": "2"}])
@@ -4449,6 +4491,8 @@ def selftest_generic(tmp):
     assert call("POST", "/api/admin/wizard", answers)[0] == 403                 # האשף רץ פעם אחת בלבד
     assert call("PUT", "/api/config", {"texts": {"footer": "x"}}, j["token"])[0] == 200
     assert g.locations() == ["אולם ראשי", "מרתף"] and g.check_password("abcd1")
+    assert g.count() == 84 and g.query({"q": "בבא מציעא"})[1] == 1 and g.query({"q": "קארו", "type": "author"})[1] == 4
+    g.delete([r["id"] for r in g.query({}, None)[0]])
     assert g.get(g.add(dict(title="א", shelf="12")))["location"] == "אולם ראשי"
     assert g.get(g.add(dict(title="ב", shelf="12-מ")))["location"] == "מרתף"
     assert g.get(g.add(dict(title="ג", shelf="700")))["location"] == ""
@@ -4458,8 +4502,15 @@ def selftest_generic(tmp):
     assert g.cfg["texts"]["app_title"] == "בית המדרש הגדול" and not g.needs_setup()
     g.close()
     s2 = Catalog(os.path.join(tmp, "skip.db"))
-    s2.apply_setup({"skip": True, "name": "לא אמור להישמר"}, "abcd1")
-    assert not s2.needs_setup() and s2.profile == {} and not s2.has_password()
+    s2.apply_setup({"skip": True, "starter": True, "name": "לא אמור להישמר"}, "abcd1")
+    assert not s2.needs_setup() and s2.profile == {} and not s2.has_password() and s2.count() == 0
+    s3 = Catalog(os.path.join(tmp, "starter.db"), profile=dict(TEST_PROFILE, starter=True))
+    assert s3.count() == 84 and not s3.needs_setup()
+    s3.delete([r["id"] for r in s3.query({}, None)[0]])
+    s3.close()
+    s3 = Catalog(os.path.join(tmp, "starter.db"), profile=dict(TEST_PROFILE, starter=True))
+    assert s3.count() == 0                                                       # ספרים שנמחקו לא חוזרים
+    s3.close()
     s2.close()
     # --- פרופיל מוטמע בקובץ התוכנה ---
     with io.open(os.path.abspath(__file__), encoding="utf-8", newline="") as f:
