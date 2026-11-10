@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>הכנת תוכנת קטלוג מותאמת</title>
+<style>
+:root{--bg:#F4F1EA;--panel:#FFFFFF;--fg:#16181D;--muted:#4C5361;--line:#C4C9D4;--accent:#1D3A6B;--accent-fg:#FFFFFF;--ok:#1F7A3A;--bad:#A61C1C}
+@media (prefers-color-scheme:dark){:root{--bg:#14171C;--panel:#1E232B;--fg:#EEF1F6;--muted:#B3BBC9;--line:#465064;--accent:#8FB4F0;--accent-fg:#0E1522;--ok:#7BD096;--bad:#F29A9A}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 "Segoe UI",Arial,"Noto Sans Hebrew",sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:1.7rem;margin:0 0 .2em}
+h2{font-size:1.1rem;margin:1.6em 0 .5em;border-bottom:1.5px solid var(--line);padding-bottom:.25em}
+p.d{color:var(--muted);margin:.2em 0 1em}
+.card{background:var(--panel);border:1.5px solid var(--line);border-radius:12px;padding:18px 20px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
+.grid .full{grid-column:1/-1}
+label{display:flex;flex-direction:column;gap:3px;font-size:.88rem;font-weight:600;color:var(--muted)}
+input,select,button{font:inherit;color:inherit}
+input,select{border:1.5px solid var(--line);border-radius:8px;padding:.45em .6em;background:var(--panel);color:var(--fg);font-weight:400;min-width:0;width:100%}
+input:focus,select:focus{outline:3px solid color-mix(in srgb,var(--accent) 40%,transparent);border-color:var(--accent)}
+label.ck{flex-direction:row;align-items:flex-start;gap:.5em;color:var(--fg);font-size:.98rem;font-weight:500;margin:.25em 0}
+label.ck input{width:1.1em;height:1.1em;margin-top:.3em;flex:none;accent-color:var(--accent)}
+.hint{font-size:.8rem;color:var(--muted);font-weight:400}
+.tblwrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:480px}
+th{font-size:.8rem;color:var(--muted);text-align:right;padding:.2em .3em}
+td{padding:.2em .3em}
+.btn{border:1.5px solid var(--line);background:var(--panel);border-radius:9px;padding:.5em 1.1em;font-weight:600;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-size:1.1rem;padding:.65em 1.6em}
+.btn.sm{padding:.2em .7em;font-size:.86rem}
+.btn:disabled{opacity:.5;cursor:default}
+.acts{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+#msg{font-weight:600;min-height:1.6em;margin-top:10px}
+#msg.ok{color:var(--ok)} #msg.bad{color:var(--bad)}
+ol{margin:.3em 0;padding-inline-start:1.3em}
+code{background:color-mix(in srgb,var(--line) 45%,transparent);border-radius:5px;padding:0 .35em;direction:ltr;unicode-bidi:embed;font-size:.92em}
+#link{direction:ltr;font-size:.85rem}
+@media(max-width:620px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1>הכנת תוכנת קטלוג מותאמת</h1>
+  <p class="d">ממלאים את פרטי הספרייה (או מקבלים קישור שבו הפרטים כבר מלאים), ולוחצים על ההורדה. מתקבל קובץ תוכנה אחד שכבר מכיר את שם הספרייה, המיקומים והעיצוב. שום פרט לא נשלח לשרת: הקובץ נבנה כאן, בדפדפן.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0">פרטי הספרייה</h2>
+    <div class="grid">
+      <label class="full">שם הספרייה (כותרת התוכנה) *<input id="name" autocomplete="off"></label>
+      <label class="full">משפט מתחת לכותרת<input id="tagline" autocomplete="off"></label>
+      <label>סימן ליד הכותרת (אימוג׳י או אות)<input id="emoji" maxlength="8"></label>
+      <label>ערכת צבעים<select id="preset">
+        <option value="parchment">קלף ויין</option><option value="royal">תכלת וזהב</option><option value="forest">ירוק עתיק</option>
+        <option value="night">לילה (כהה)</option><option value="contrast">ניגודיות גבוהה</option></select></label>
+      <label class="full">מזהה ההתקנה (שם תיקיית הנתונים במחשב)<input id="app_id" autocomplete="off"><span class="hint">לא חובה. כדאי למלא כשמתקינים במחשב אחד יותר מספרייה אחת, כדי שהנתונים לא יתערבבו.</span></label>
+    </div>
+
+    <h2>מיקומים ומדפים</h2>
+    <p class="hint">המיקום של כל ספר נקבע לפי מספר המדף (1–999). לכל מיקום: טווח מדפים, או אות שנכתבת ליד מספר המדף. אפשר להשאיר ריק ולהגדיר אחר כך בתוכנה.</p>
+    <div class="tblwrap"><table><thead><tr><th>שם המיקום</th><th style="width:6.5em">ממדף</th><th style="width:6.5em">עד מדף</th><th style="width:5.5em">אות</th><th style="width:3em"></th></tr></thead><tbody id="locs"></tbody></table></div>
+    <div class="acts" style="margin-top:6px"><button class="btn sm" id="addLoc" type="button">＋ מיקום</button></div>
+
+    <h2>מצבי ספר</h2>
+    <label>רשימת המצבים, מופרדים בפסיק<input id="conds" autocomplete="off" placeholder="חדש, טוב, בינוני, דורש תיקון"><span class="hint">לא חובה. ריק = הרשימה הרגילה.</span></label>
+
+    <h2>ספרים</h2>
+    <label class="ck"><input type="radio" name="starter" value="0" checked> קטלוג ריק לגמרי</label>
+    <label class="ck"><input type="radio" name="starter" value="1"> קטלוג בסיסי: 84 ספרי יסוד (חומשים, מקראות גדולות, נ״ך, משניות, ש״ס, רמב״ם, טור, שולחן ערוך, משנה ברורה) — מוחקים מה שלא צריך</label>
+
+    <div class="acts">
+      <button class="btn primary" id="go" type="button">⬇ הורדת התוכנה</button>
+      <button class="btn" id="dlProfile" type="button">הורדת profile.json בלבד</button>
+      <button class="btn" id="copy" type="button">העתקת קישור עם הפרטים</button>
+    </div>
+    <div id="msg" role="status"></div>
+    <div id="pick" hidden>
+      <p class="hint">לא ניתן לטעון את קובץ התוכנה הגנרי מהאתר. בחר אותו מהמחשב (<code>book_catalog.py</code>):</p>
+      <input type="file" id="srcFile" accept=".py">
+    </div>
+    <label style="margin-top:12px">הקישור עם הפרטים<input id="link" readonly></label>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h2 style="margin-top:0">אחרי ההורדה</h2>
+    <ol>
+      <li>מתקינים <a href="https://www.python.org/downloads/">פייתון</a> (3.8 ומעלה). מומלץ גם: <code>pip install pywebview</code> — כך התוכנה נפתחת בחלון משלה ולא בדפדפן.</li>
+      <li>מפעילים: <code>python book_catalog.py</code></li>
+      <li>לוחצים על המנעול וקובעים סיסמת מנהל. משם אפשר להוסיף ספרים, לייבא קטלוג קיים (Excel או CSV), ולמחוק ספרים מהקטלוג הבסיסי.</li>
+    </ol>
+  </div>
+</main>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+const PRESETS=['parchment','royal','forest','night','contrast'];
+const SOURCE='book_catalog.py';            /* הקובץ הגנרי, באותה תיקייה של הדף הזה */
+const LINE=/^PROFILE_B64 = "([A-Za-z0-9+/=]*)"[ \t]*\r?$/m;
+let source=null;
+
+function b64utf8(str){const b=new TextEncoder().encode(str);let bin='';for(let i=0;i<b.length;i+=0x8000)bin+=String.fromCharCode.apply(null,b.subarray(i,i+0x8000));return btoa(bin);}
+function utf8b64(b64){const bin=atob(b64.replace(/-/g,'+').replace(/_/g,'/'));return new TextDecoder().decode(Uint8Array.from(bin,c=>c.charCodeAt(0)));}
+const b64url=s=>b64utf8(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+function say(t,cls){const m=$('#msg');m.textContent=t;m.className=cls||'';}
+
+function addLoc(l){
+  l=l||{}; const tr=document.createElement('tr');
+  tr.innerHTML='<td><input class="ln"></td><td><input class="lf" type="number" min="1" max="999"></td><td><input class="lt" type="number" min="1" max="999"></td><td><input class="ll" maxlength="6"></td><td><button class="btn sm" type="button" title="הסרה">✕</button></td>';
+  tr.querySelector('.ln').value=l.name||''; tr.querySelector('.lf').value=l.shelf_from??''; tr.querySelector('.lt').value=l.shelf_to??''; tr.querySelector('.ll').value=l.letter||'';
+  tr.querySelector('button').onclick=()=>{tr.remove();refresh();};
+  $('#locs').appendChild(tr);
+}
+
+/* ---- הפרטים מהקישור: ?name=…&tagline=…&emoji=…&preset=…&id=…&loc=שם:1-399&loc=שם::פ&cond=…  או  ?p=<base64url של JSON> ---- */
+function fromUrl(){
+  const u=new URLSearchParams(location.search.slice(1));
+  new URLSearchParams(location.hash.slice(1)).forEach((v,k)=>u.append(k,v));
+  let p={};
+  if(u.get('p')){try{const j=JSON.parse(utf8b64(u.get('p')));if(j&&typeof j==='object'&&!Array.isArray(j))p=j;}catch(_){say('הקישור פגום: לא ניתן לקרוא את הפרטים שבו.','bad');}}
+  for(const [k,key] of [['name','name'],['tagline','tagline'],['emoji','emoji'],['preset','preset'],['id','app_id']])if(u.has(k))p[key]=u.get(k);
+  const locs=u.getAll('loc').map(s=>{const [name,range,letter]=s.split(':');const m=/^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(range||'');
+    return {name:(name||'').trim(),shelf_from:m?+m[1]:null,shelf_to:m?+m[2]:null,letter:(letter||'').trim()};}).filter(l=>l.name);
+  if(locs.length)p.locations=locs;
+  const conds=u.getAll('cond').flatMap(s=>s.split(',')).map(s=>s.trim()).filter(Boolean);
+  if(conds.length)p.conditions=conds;
+  if(u.has('starter'))p.starter=u.get('starter')==='1';
+  return {profile:p,auto:u.get('auto')==='1'};
+}
+let extra={};                                /* שדות מתקדמים מהקישור (config) שאין להם תיבה בטופס */
+function fill(p){
+  $('#name').value=p.name||''; $('#tagline').value=p.tagline||''; $('#emoji').value=p.emoji||'';
+  $('#preset').value=PRESETS.includes(p.preset)?p.preset:'parchment'; $('#app_id').value=p.app_id||'';
+  $('#conds').value=(Array.isArray(p.conditions)?p.conditions:[]).map(c=>typeof c==='object'&&c?c.name:c).filter(Boolean).join(', ');
+  $('#locs').innerHTML=''; (Array.isArray(p.locations)?p.locations:[]).forEach(addLoc);
+  if(!$('#locs').children.length){addLoc();addLoc();}
+  document.querySelector('input[name=starter][value="'+(p.starter?1:0)+'"]').checked=true;
+  extra=p.config&&typeof p.config==='object'?{config:p.config}:{};
+}
+function collect(){
+  const p=Object.assign({},extra), v=id=>$(id).value.trim();
+  if(v('#name'))p.name=v('#name'); if(v('#tagline'))p.tagline=v('#tagline'); if(v('#emoji'))p.emoji=v('#emoji');
+  p.preset=$('#preset').value; if(v('#app_id'))p.app_id=v('#app_id');
+  const locs=[], errs=[];
+  for(const tr of $('#locs').children){
+    const name=tr.querySelector('.ln').value.trim(), a=tr.querySelector('.lf').value, b=tr.querySelector('.lt').value, letter=tr.querySelector('.ll').value.trim();
+    if(!name){ if(a||b||letter)errs.push('יש מיקום בלי שם'); continue; }
+    if((a==='')!==(b===''))errs.push(`במיקום "${name}" יש למלא גם "ממדף" וגם "עד מדף"`);
+    else if(a!==''&&(+a<1||+b>999||+a>+b))errs.push(`במיקום "${name}" טווח המדפים אינו תקין (1–999)`);
+    if(locs.some(l=>l.name===name))errs.push(`המיקום "${name}" מופיע פעמיים`);
+    locs.push({name,shelf_from:a===''?null:+a,shelf_to:b===''?null:+b,letter});
+  }
+  if(locs.length)p.locations=locs;
+  const conds=v('#conds').split(',').map(s=>s.trim()).filter(Boolean); if(conds.length)p.conditions=conds;
+  if(document.querySelector('input[name=starter]:checked').value==='1')p.starter=true;
+  if(!p.name)errs.unshift('יש להקליד את שם הספרייה');
+  return {profile:p,errs};
+}
+function refresh(){ const {profile}=collect(); $('#link').value=location.origin+location.pathname+'?p='+b64url(JSON.stringify(profile)); }
+function download(name,text,type){
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+async function loadSource(){
+  if(source)return source;
+  try{
+    const r=await fetch(SOURCE,{cache:'no-store'}); if(!r.ok)throw new Error(r.status);
+    const t=await r.text(); if(!LINE.test(t))throw new Error('bad file'); source=t;
+  }catch(_){ $('#pick').hidden=false; throw new Error('pick'); }
+  return source;
+}
+async function build(){
+  const {profile,errs}=collect();
+  if(errs.length){say(errs[0],'bad');return;}
+  $('#go').disabled=true;
+  try{
+    const src=await loadSource();
+    const out=src.replace(LINE,()=>'PROFILE_B64 = "'+b64utf8(JSON.stringify(profile))+'"');
+    download('book_catalog.py',out,'text/x-python;charset=utf-8');
+    say('התוכנה של "'+profile.name+'" הורדה. ההוראות להפעלה - למטה.','ok');
+  }catch(e){ if(e.message!=='pick')say('ההכנה נכשלה: '+e.message,'bad'); else say('יש לבחור את קובץ התוכנה הגנרי מהמחשב.','bad'); }
+  $('#go').disabled=false;
+}
+$('#go').onclick=build;
+$('#srcFile').onchange=async e=>{
+  const f=e.target.files[0]; if(!f)return; const t=await f.text();
+  if(!LINE.test(t)){say('הקובץ שנבחר אינו קובץ התוכנה הגנרי.','bad');return;}
+  source=t; $('#pick').hidden=true; build();
+};
+$('#dlProfile').onclick=()=>{const {profile,errs}=collect();if(errs.length){say(errs[0],'bad');return;}download('profile.json',JSON.stringify(profile,null,2),'application/json');say('profile.json הורד. מניחים אותו ליד book_catalog.py הגנרי.','ok');};
+$('#copy').onclick=async()=>{refresh();try{await navigator.clipboard.writeText($('#link').value);say('הקישור הועתק.','ok');}catch(_){$('#link').select();say('סמן והעתק את הקישור שלמטה.','');}};
+$('#addLoc').onclick=()=>addLoc();
+document.querySelector('.card').addEventListener('input',refresh);
+
+const start=fromUrl(); fill(start.profile); refresh();
+if(start.auto&&!collect().errs.length)build();
+</script>
+</body>
+</html>
